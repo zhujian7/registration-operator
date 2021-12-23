@@ -12,6 +12,9 @@ metadata:
           },
           "spec": {
             "clusterName": "cluster1",
+            "deployOption": {
+              "mode": "Default"
+            },
             "externalServerURLs": [
               {
                 "url": "https://localhost"
@@ -19,10 +22,28 @@ metadata:
             ],
             "namespace": "open-cluster-management-agent",
             "registrationImagePullSpec": "quay.io/open-cluster-management/registration",
-            "workImagePullSpec": "quay.io/open-cluster-management/work",
+            "workImagePullSpec": "quay.io/open-cluster-management/work"
+          }
+        },
+        {
+          "apiVersion": "operator.open-cluster-management.io/v1",
+          "kind": "Klusterlet",
+          "metadata": {
+            "name": "klusterlet"
+          },
+          "spec": {
+            "clusterName": "cluster1",
             "deployOption": {
-              "mode": "Default"
-            }
+              "mode": "Detached"
+            },
+            "externalServerURLs": [
+              {
+                "url": "https://localhost"
+              }
+            ],
+            "namespace": "open-cluster-management-agent",
+            "registrationImagePullSpec": "quay.io/open-cluster-management/registration",
+            "workImagePullSpec": "quay.io/open-cluster-management/work"
           }
         }
       ]
