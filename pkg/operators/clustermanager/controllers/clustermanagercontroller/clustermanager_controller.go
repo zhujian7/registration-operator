@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -50,6 +51,7 @@ var (
 		"cluster-manager/hub/0000_01_addon.open-cluster-management.io_managedclusteraddons.crd.yaml",
 		"cluster-manager/hub/0000_01_clusters.open-cluster-management.io_managedclustersetbindings.crd.yaml",
 		"cluster-manager/hub/0000_02_clusters.open-cluster-management.io_placements.crd.yaml",
+		"cluster-manager/hub/0000_02_addon.open-cluster-management.io_addondeploymentconfigs.crd.yaml",
 		"cluster-manager/hub/0000_03_clusters.open-cluster-management.io_placementdecisions.crd.yaml",
 		"cluster-manager/hub/0000_05_clusters.open-cluster-management.io_addonplacementscores.crd.yaml",
 	}
@@ -120,6 +122,7 @@ const (
 	caBundleConfigmap       = "ca-bundle-configmap"
 
 	hubRegistrationFeatureGatesValid = "ValidRegistrationFeatureGates"
+	hubWorkFeatureGatesValid         = "ValidWorkFeatureGates"
 )
 
 type clusterManagerController struct {
@@ -133,6 +136,7 @@ type clusterManagerController struct {
 	// For testcases which don't need these functions, we could set fake funcs
 	generateHubClusterClients func(hubConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, apiregistrationclient.APIServicesGetter, error)
 	ensureSAKubeconfigs       func(ctx context.Context, clusterManagerName, clusterManagerNamespace string, hubConfig *rest.Config, hubClient, managementClient kubernetes.Interface, recorder events.Recorder) error
+	skipRemoveCRDs            bool
 }
 
 // NewClusterManagerController construct cluster manager hub controller
@@ -144,6 +148,7 @@ func NewClusterManagerController(
 	deploymentInformer appsinformer.DeploymentInformer,
 	configMapInformer corev1informers.ConfigMapInformer,
 	recorder events.Recorder,
+	skipRemoveCRDs bool,
 ) factory.Controller {
 	controller := &clusterManagerController{
 		operatorKubeClient:        operatorKubeClient,
@@ -155,6 +160,7 @@ func NewClusterManagerController(
 		generateHubClusterClients: generateHubClients,
 		ensureSAKubeconfigs:       ensureSAKubeconfigs,
 		cache:                     resourceapply.NewResourceCache(),
+		skipRemoveCRDs:            skipRemoveCRDs,
 	}
 
 	return factory.New().WithSync(controller.sync).
@@ -175,6 +181,46 @@ func NewClusterManagerController(
 			return accessor.GetName()
 		}, clusterManagerInformer.Informer()).
 		ToController("ClusterManagerController", recorder)
+}
+
+func (n *clusterManagerController) checkFeatureGate(
+	ctx context.Context,
+	clusterManagerName string,
+	featureGates []operatorapiv1.FeatureGate,
+	component string) ([]string, metav1.Condition, error) {
+
+	var conditionType, featureGateKey string
+	switch component {
+	case "registration":
+		conditionType = hubRegistrationFeatureGatesValid
+		featureGateKey = helpers.ComponentHubRegistrationKey
+	case "work":
+		conditionType = hubWorkFeatureGatesValid
+		featureGateKey = helpers.ComponentHubWorkKey
+	default:
+		return nil, metav1.Condition{}, fmt.Errorf("not supported component: %s", component)
+	}
+
+	if len(featureGates) > 0 {
+		featureGateArgs, invalidFeatureGates := helpers.FeatureGatesArgs(featureGates, featureGateKey)
+		if len(invalidFeatureGates) == 0 {
+			return featureGateArgs, metav1.Condition{
+				Type:    conditionType,
+				Status:  metav1.ConditionTrue,
+				Reason:  "FeatureGatesAllValid",
+				Message: fmt.Sprintf("%s feature gates of cluster manager are all valid", strings.ToUpper(component[:1])+component[1:]),
+			}, nil
+		} else {
+			invalidFGErr := fmt.Errorf("there are some invalid feature gates of %s: %v ", component, invalidFeatureGates)
+			_, _, updateError := helpers.UpdateClusterManagerStatus(ctx, n.clusterManagerClient, clusterManagerName, helpers.UpdateClusterManagerConditionFn(metav1.Condition{
+				Type: conditionType, Status: metav1.ConditionFalse, Reason: "InvalidFeatureGatesExisting",
+				Message: invalidFGErr.Error(),
+			}))
+			return nil, metav1.Condition{}, updateError
+		}
+	}
+
+	return nil, metav1.Condition{}, nil
 }
 
 func (n *clusterManagerController) sync(ctx context.Context, controllerContext factory.SyncContext) error {
@@ -206,26 +252,27 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 
 	conditions := &clusterManager.Status.Conditions
 
-	// If there are some invalid feature gates of registration, will output condition `InvalidRegistrationFeatureGates` in ClusterManager.
-	if clusterManager.Spec.RegistrationConfiguration != nil && len(clusterManager.Spec.RegistrationConfiguration.FeatureGates) > 0 {
-		featureGateArgs, invalidFeatureGates := helpers.FeatureGatesArgs(
-			clusterManager.Spec.RegistrationConfiguration.FeatureGates, helpers.ComponentHubKey)
-		if len(invalidFeatureGates) == 0 {
-			config.RegistrationFeatureGates = featureGateArgs
-			meta.SetStatusCondition(conditions, metav1.Condition{
-				Type:    hubRegistrationFeatureGatesValid,
-				Status:  metav1.ConditionTrue,
-				Reason:  "FeatureGatesAllValid",
-				Message: "Registration feature gates of cluster manager are all valid",
-			})
-		} else {
-			invalidFGErr := fmt.Errorf("there are some invalid feature gates of registration: %v ", invalidFeatureGates)
-			_, _, updateError := helpers.UpdateClusterManagerStatus(ctx, n.clusterManagerClient, clusterManagerName, helpers.UpdateClusterManagerConditionFn(metav1.Condition{
-				Type: hubRegistrationFeatureGatesValid, Status: metav1.ConditionFalse, Reason: "InvalidFeatureGatesExisting",
-				Message: invalidFGErr.Error(),
-			}))
-			return updateError
+	// If there are some invalid feature gates of registration, will output
+	// condition `InvalidRegistrationFeatureGates` in ClusterManager.
+	if clusterManager.Spec.RegistrationConfiguration != nil {
+		featureGates, condition, err := n.checkFeatureGate(ctx, clusterManagerName,
+			clusterManager.Spec.RegistrationConfiguration.FeatureGates, "registration")
+		if err != nil {
+			return err
 		}
+		config.RegistrationFeatureGates = featureGates
+		meta.SetStatusCondition(conditions, condition)
+	}
+	// If there are some invalid feature gates of work, will output
+	// condition `InvalidWorkFeatureGates` in ClusterManager.
+	if clusterManager.Spec.WorkConfiguration != nil {
+		featureGates, condition, err := n.checkFeatureGate(ctx, clusterManagerName,
+			clusterManager.Spec.WorkConfiguration.FeatureGates, "work")
+		if err != nil {
+			return err
+		}
+		config.WorkFeatureGates = featureGates
+		meta.SetStatusCondition(conditions, condition)
 	}
 
 	// If we are deploying in the hosted mode, it requires us to create webhook in a different way with the default mode.
@@ -265,7 +312,7 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 
 	// If the ClusterManager is deleting, we remove its related resources on hub
 	if !clusterManager.DeletionTimestamp.IsZero() {
-		if err := cleanUpHub(ctx, controllerContext, clusterManagerMode, hubClient, hubApiExtensionClient, hubApiRegistrationClient, config); err != nil {
+		if err := cleanUpHub(ctx, controllerContext, clusterManagerMode, hubClient, hubApiExtensionClient, hubApiRegistrationClient, config, n.skipRemoveCRDs); err != nil {
 			return err
 		}
 		if err := cleanUpManagement(ctx, controllerContext, managementClient, config); err != nil {
@@ -352,7 +399,7 @@ func applyHubResources(
 	cache resourceapply.ResourceCache,
 ) (appliedErrs []error, err error) {
 	// Apply hub cluster resources
-	hubResources := getHubResources(clusterManagerMode, manifestsConfig.RegistrationWebhook.IsIPFormat, manifestsConfig.WorkWebhook.IsIPFormat)
+	hubResources := getHubResources(clusterManagerMode, manifestsConfig.RegistrationWebhook.IsIPFormat, manifestsConfig.WorkWebhook.IsIPFormat, false)
 	resourceResults := helpers.ApplyDirectly(
 		ctx,
 		hubClient,
@@ -550,18 +597,21 @@ func removeCRD(ctx context.Context, apiExtensionClient apiextensionsclient.Inter
 func cleanUpHub(ctx context.Context, controllerContext factory.SyncContext,
 	mode operatorapiv1.InstallMode,
 	kubeClient kubernetes.Interface, apiExtensionClient apiextensionsclient.Interface, apiRegistrationClient apiregistrationclient.APIServicesGetter,
-	config manifests.HubConfig) error {
-	// Remove crd
-	for _, name := range crdNames {
-		err := removeCRD(ctx, apiExtensionClient, name)
-		if err != nil {
-			return err
+	config manifests.HubConfig, skipRemoveCRDs bool) error {
+
+	if !skipRemoveCRDs {
+		// Remove crd
+		for _, name := range crdNames {
+			err := removeCRD(ctx, apiExtensionClient, name)
+			if err != nil {
+				return err
+			}
+			controllerContext.Recorder().Eventf("CRDDeleted", "crd %s is deleted", name)
 		}
-		controllerContext.Recorder().Eventf("CRDDeleted", "crd %s is deleted", name)
 	}
 
 	// Remove All Static files
-	hubResources := append(getHubResources(mode, config.RegistrationWebhook.IsIPFormat, config.WorkWebhook.IsIPFormat), hubApiserviceFiles...)
+	hubResources := append(getHubResources(mode, config.RegistrationWebhook.IsIPFormat, config.WorkWebhook.IsIPFormat, skipRemoveCRDs), hubApiserviceFiles...)
 	for _, file := range hubResources {
 		err := helpers.CleanUpStaticObject(
 			ctx,
@@ -656,9 +706,12 @@ func getSAs(clusterManagerName string) []string {
 	}
 }
 
-func getHubResources(mode operatorapiv1.InstallMode, isRegistrationIPFormat, isWorkIPFormat bool) []string {
+func getHubResources(mode operatorapiv1.InstallMode, isRegistrationIPFormat, isWorkIPFormat, skipAddCRDs bool) []string {
 	hubResources := []string{namespaceResource}
-	hubResources = append(hubResources, hubCRDResourceFiles...)
+	if !skipAddCRDs {
+		hubResources = append(hubResources, hubCRDResourceFiles...)
+	}
+
 	hubResources = append(hubResources, hubWebhookResourceFiles...)
 	hubResources = append(hubResources, hubRbacResourceFiles...)
 
