@@ -405,6 +405,7 @@ func assertWorkDeployment(t *testing.T, actions []clienttesting.Action, verb, cl
 		"agent",
 		fmt.Sprintf("--spoke-cluster-name=%s", clusterName),
 		"--hub-kubeconfig=/spoke/hub-kubeconfig/kubeconfig",
+		"--agent-id=",
 	}
 
 	if mode == operatorapiv1.InstallModeHosted {
@@ -516,7 +517,7 @@ func TestSyncDeploy(t *testing.T) {
 	testinghelper.AssertOnlyConditions(
 		t, operatorAction[3].(clienttesting.UpdateActionImpl).Object,
 		testinghelper.NamedCondition(klusterletApplied, "KlusterletApplied", metav1.ConditionTrue),
-		testinghelper.NamedCondition(spokeRegistrationFeatureGatesInvalid, "FeatureGatesAllValid", metav1.ConditionTrue))
+		testinghelper.NamedCondition(spokeRegistrationFeatureGatesValid, "FeatureGatesAllValid", metav1.ConditionTrue))
 }
 
 // TestSyncDeployHosted test deployment of klusterlet components in hosted mode
@@ -619,7 +620,7 @@ func TestSyncDeployHosted(t *testing.T) {
 
 	conditionReady := testinghelper.NamedCondition(klusterletReadyToApply, "KlusterletPrepared", metav1.ConditionTrue)
 	conditionApplied := testinghelper.NamedCondition(klusterletApplied, "KlusterletApplied", metav1.ConditionTrue)
-	conditionFeaturesValid := testinghelper.NamedCondition(spokeRegistrationFeatureGatesInvalid, "FeatureGatesAllValid", metav1.ConditionTrue)
+	conditionFeaturesValid := testinghelper.NamedCondition(spokeRegistrationFeatureGatesValid, "FeatureGatesAllValid", metav1.ConditionTrue)
 	testinghelper.AssertOnlyConditions(
 		t, operatorAction[1].(clienttesting.UpdateActionImpl).Object, conditionReady, conditionFeaturesValid)
 	testinghelper.AssertOnlyConditions(
@@ -936,7 +937,7 @@ func TestDeployOnKube111(t *testing.T) {
 	testinghelper.AssertOnlyConditions(
 		t, operatorAction[3].(clienttesting.UpdateActionImpl).Object,
 		testinghelper.NamedCondition(klusterletApplied, "KlusterletApplied", metav1.ConditionTrue),
-		testinghelper.NamedCondition(spokeRegistrationFeatureGatesInvalid, "FeatureGatesAllValid", metav1.ConditionTrue))
+		testinghelper.NamedCondition(spokeRegistrationFeatureGatesValid, "FeatureGatesAllValid", metav1.ConditionTrue))
 
 	// Delete the klusterlet
 	now := metav1.Now()
