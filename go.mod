@@ -19,7 +19,7 @@ require (
 	k8s.io/component-base v0.24.3
 	k8s.io/klog/v2 v2.70.0
 	k8s.io/kube-aggregator v0.24.3
-	open-cluster-management.io/api v0.9.1-0.20221116150238-55691c2c5f04
+	open-cluster-management.io/api v0.10.1-0.20230216050312-b716d4a5c514
 	sigs.k8s.io/controller-runtime v0.12.3
 	sigs.k8s.io/kube-storage-version-migrator v0.0.5
 )
@@ -57,7 +57,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
-	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
+	github.com/emicklei/go-restful v2.16.0+incompatible // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
@@ -70,7 +70,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
-	github.com/google/uuid v1.1.2 // indirect
+	github.com/google/uuid v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
