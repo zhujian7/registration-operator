@@ -3,6 +3,7 @@ package clustermanagercontroller
 import (
 	"context"
 	"encoding/base64"
+
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 
 	errorhelpers "errors"
@@ -14,8 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	apiregistrationclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/typed/apiregistration/v1"
 
+	"github.com/openshift/library-go/pkg/assets"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
@@ -55,7 +56,7 @@ type clusterManagerController struct {
 	cache                resourceapply.ResourceCache
 	// For testcases which don't need these functions, we could set fake funcs
 	ensureSAKubeconfigs       func(ctx context.Context, clusterManagerName, clusterManagerNamespace string, hubConfig *rest.Config, hubClient, managementClient kubernetes.Interface, recorder events.Recorder) error
-	generateHubClusterClients func(hubConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, apiregistrationclient.APIServicesGetter, migrationclient.StorageVersionMigrationsGetter, error)
+	generateHubClusterClients func(hubConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, migrationclient.StorageVersionMigrationsGetter, error)
 	skipRemoveCRDs            bool
 }
 
@@ -138,6 +139,7 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 		RegistrationImage:       clusterManager.Spec.RegistrationImagePullSpec,
 		WorkImage:               clusterManager.Spec.WorkImagePullSpec,
 		PlacementImage:          clusterManager.Spec.PlacementImagePullSpec,
+		AddOnManagerImage:       clusterManager.Spec.AddOnManagerImagePullSpec,
 		Replica:                 helpers.DetermineReplica(ctx, n.operatorKubeClient, clusterManager.Spec.DeployOption.Mode, nil),
 		HostedMode:              clusterManager.Spec.DeployOption.Mode == operatorapiv1.InstallModeHosted,
 		RegistrationWebhook: manifests.Webhook{
@@ -146,6 +148,10 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 		WorkWebhook: manifests.Webhook{
 			Port: defaultWebhookPort,
 		},
+	}
+
+	if clusterManager.Spec.AddOnManagerConfiguration != nil {
+		config.AddOnManagerComponentMode = string(clusterManager.Spec.AddOnManagerConfiguration.Mode)
 	}
 
 	var featureGateCondition metav1.Condition
@@ -185,7 +191,7 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 	if err != nil {
 		return err
 	}
-	hubClient, hubApiExtensionClient, hubApiRegistrationClient, hubMigrationClient, err := n.generateHubClusterClients(hubKubeConfig)
+	hubClient, hubApiExtensionClient, hubMigrationClient, err := n.generateHubClusterClients(hubKubeConfig)
 	if err != nil {
 		return err
 	}
@@ -194,7 +200,7 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 	var errs []error
 	reconcilers := []clusterManagerReconcile{
 		&crdReconcile{cache: n.cache, recorder: n.recorder, hubAPIExtensionClient: hubApiExtensionClient, hubMigrationClient: hubMigrationClient, skipRemoveCRDs: n.skipRemoveCRDs},
-		&hubReoncile{cache: n.cache, recorder: n.recorder, hubKubeClient: hubClient, hubAPIRegistrationClient: hubApiRegistrationClient},
+		&hubReoncile{cache: n.cache, recorder: n.recorder, hubKubeClient: hubClient},
 		&runtimeReconcile{cache: n.cache, recorder: n.recorder, hubKubeConfig: hubKubeConfig, hubKubeClient: hubClient, kubeClient: managementClient, ensureSAKubeconfigs: n.ensureSAKubeconfigs},
 		&webhookReconcile{cache: n.cache, recorder: n.recorder, hubKubeClient: hubClient, kubeClient: managementClient},
 	}
@@ -313,24 +319,21 @@ func removeClusterManagerFinalizer(ctx context.Context, clusterManagerClient ope
 	return nil
 }
 
-func generateHubClients(hubKubeConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, apiregistrationclient.APIServicesGetter, migrationclient.StorageVersionMigrationsGetter, error) {
+func generateHubClients(hubKubeConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, migrationclient.StorageVersionMigrationsGetter, error) {
 	hubClient, err := kubernetes.NewForConfig(hubKubeConfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	hubApiExtensionClient, err := apiextensionsclient.NewForConfig(hubKubeConfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
-	hubApiRegistrationClient, err := apiregistrationclient.NewForConfig(hubKubeConfig)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
+
 	hubMigrationClient, err := migrationclient.NewForConfig(hubKubeConfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
-	return hubClient, hubApiExtensionClient, hubApiRegistrationClient, hubMigrationClient, nil
+	return hubClient, hubApiExtensionClient, hubMigrationClient, nil
 }
 
 // ensureSAKubeconfigs is used to create a kubeconfig with a token from a ServiceAccount.
@@ -371,4 +374,28 @@ func convertWebhookConfiguration(webhookConfiguration operatorapiv1.WebhookConfi
 		Port:       webhookConfiguration.Port,
 		IsIPFormat: isIPFormat(webhookConfiguration.Address),
 	}
+}
+
+// clean specified resources
+func cleanResources(ctx context.Context, kubeClient kubernetes.Interface, cm *operatorapiv1.ClusterManager, config manifests.HubConfig, resources ...string) (*operatorapiv1.ClusterManager, reconcileState, error) {
+	for _, file := range resources {
+		err := helpers.CleanUpStaticObject(
+			ctx,
+			kubeClient, nil, nil,
+			func(name string) ([]byte, error) {
+				template, err := manifests.ClusterManagerManifestFiles.ReadFile(name)
+				if err != nil {
+					return nil, err
+				}
+				objData := assets.MustCreateAssetFromTemplate(name, template, config).Data
+				helpers.RemoveRelatedResourcesStatusesWithObj(&cm.Status.RelatedResources, objData)
+				return objData, nil
+			},
+			file,
+		)
+		if err != nil {
+			return cm, reconcileContinue, err
+		}
+	}
+	return cm, reconcileContinue, nil
 }

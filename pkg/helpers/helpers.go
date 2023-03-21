@@ -2,7 +2,6 @@ package helpers
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"reflect"
 
@@ -251,6 +250,8 @@ func CleanUpStaticObject(
 	switch t := object.(type) {
 	case *corev1.Namespace:
 		err = client.CoreV1().Namespaces().Delete(ctx, t.Name, metav1.DeleteOptions{})
+	case *appsv1.Deployment:
+		err = client.AppsV1().Deployments(t.Namespace).Delete(ctx, t.Name, metav1.DeleteOptions{})
 	case *corev1.Endpoints:
 		err = client.CoreV1().Endpoints(t.Namespace).Delete(ctx, t.Name, metav1.DeleteOptions{})
 	case *corev1.Service:
@@ -422,7 +423,6 @@ func ApplyDirectly(
 	ctx context.Context,
 	client kubernetes.Interface,
 	apiExtensionClient apiextensionsclient.Interface,
-	apiRegistrationClient apiregistrationclient.APIServicesGetter,
 	recorder events.Recorder,
 	cache resourceapply.ResourceCache,
 	manifests resourceapply.AssetFunc,
@@ -455,15 +455,6 @@ func ApplyDirectly(
 		case *admissionv1.MutatingWebhookConfiguration:
 			result.Result, result.Changed, result.Error = ApplyMutatingWebhookConfiguration(
 				client.AdmissionregistrationV1(), t)
-		case *apiregistrationv1.APIService:
-			if apiRegistrationClient == nil {
-				result.Error = fmt.Errorf("apiRegistrationClient is nil")
-			} else {
-				t.ObjectMeta.Annotations = make(map[string]string)
-				checksum := fmt.Sprintf("%x", sha256.Sum256(t.Spec.CABundle))
-				t.ObjectMeta.Annotations["caBundle-checksum"] = string(checksum[:]) // to trigger the update when caBundle changed
-				result.Result, result.Changed, result.Error = resourceapply.ApplyAPIService(ctx, apiRegistrationClient, recorder, t)
-			}
 		case *corev1.Endpoints:
 			result.Result, result.Changed, result.Error = ApplyEndpoints(context.TODO(), client.CoreV1(), t)
 		default:
@@ -717,6 +708,20 @@ func SetRelatedResourcesStatuses(
 	}
 }
 
+func RemoveRelatedResourcesStatuses(
+	relatedResourcesStatuses *[]operatorapiv1.RelatedResourceMeta,
+	rmRelatedResourcesStatus operatorapiv1.RelatedResourceMeta) {
+	if relatedResourcesStatuses == nil {
+		return
+	}
+
+	existingRelatedResource := FindRelatedResourcesStatus(*relatedResourcesStatuses, rmRelatedResourcesStatus)
+	if existingRelatedResource != nil {
+		RemoveRelatedResourcesStatus(relatedResourcesStatuses, rmRelatedResourcesStatus)
+		return
+	}
+}
+
 func FindRelatedResourcesStatus(
 	relatedResourcesStatuses []operatorapiv1.RelatedResourceMeta,
 	relatedResource operatorapiv1.RelatedResourceMeta) *operatorapiv1.RelatedResourceMeta {
@@ -728,6 +733,18 @@ func FindRelatedResourcesStatus(
 	return nil
 }
 
+func RemoveRelatedResourcesStatus(
+	relatedResourcesStatuses *[]operatorapiv1.RelatedResourceMeta,
+	relatedResource operatorapiv1.RelatedResourceMeta) {
+	var result []operatorapiv1.RelatedResourceMeta
+	for _, v := range *relatedResourcesStatuses {
+		if v != relatedResource {
+			result = append(result, v)
+		}
+	}
+	*relatedResourcesStatuses = result
+}
+
 func SetRelatedResourcesStatusesWithObj(
 	relatedResourcesStatuses *[]operatorapiv1.RelatedResourceMeta, objData []byte) {
 	res, err := GenerateRelatedResource(objData)
@@ -736,6 +753,16 @@ func SetRelatedResourcesStatusesWithObj(
 		return
 	}
 	SetRelatedResourcesStatuses(relatedResourcesStatuses, res)
+}
+
+func RemoveRelatedResourcesStatusesWithObj(
+	relatedResourcesStatuses *[]operatorapiv1.RelatedResourceMeta, objData []byte) {
+	res, err := GenerateRelatedResource(objData)
+	if err != nil {
+		klog.Errorf("failed to generate relatedResource %v, and skip to set into status. %v", objData, err)
+		return
+	}
+	RemoveRelatedResourcesStatuses(relatedResourcesStatuses, res)
 }
 
 func UpdateClusterManagerRelatedResourcesFn(relatedResources ...operatorapiv1.RelatedResourceMeta) UpdateClusterManagerStatusFunc {

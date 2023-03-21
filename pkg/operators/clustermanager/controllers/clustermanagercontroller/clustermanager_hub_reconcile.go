@@ -7,6 +7,7 @@ package clustermanagercontroller
 import (
 	"context"
 	"fmt"
+
 	"github.com/openshift/library-go/pkg/assets"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
@@ -14,7 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/kubernetes"
-	apiregistrationclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/typed/apiregistration/v1"
 	operatorapiv1 "open-cluster-management.io/api/operator/v1"
 	"open-cluster-management.io/registration-operator/manifests"
 	"open-cluster-management.io/registration-operator/pkg/helpers"
@@ -43,6 +43,13 @@ var (
 		"cluster-manager/hub/cluster-manager-placement-serviceaccount.yaml",
 	}
 
+	hubAddOnManagerRbacResourceFiles = []string{
+		// addon-manager
+		"cluster-manager/hub/cluster-manager-addon-manager-clusterrole.yaml",
+		"cluster-manager/hub/cluster-manager-addon-manager-clusterrolebinding.yaml",
+		"cluster-manager/hub/cluster-manager-addon-manager-serviceaccount.yaml",
+	}
+
 	// The hubHostedWebhookServiceFiles should only be deployed on the hub cluster when the deploy mode is hosted.
 	hubDefaultWebhookServiceFiles = []string{
 		"cluster-manager/hub/cluster-manager-registration-webhook-service.yaml",
@@ -56,30 +63,29 @@ var (
 	// hubHostedWebhookEndpointFiles only apply when the deploy mode is hosted and address is IPFormat.
 	hubHostedWebhookEndpointRegistration = "cluster-manager/hub/cluster-manager-registration-webhook-endpoint-hosted.yaml"
 	hubHostedWebhookEndpointWork         = "cluster-manager/hub/cluster-manager-work-webhook-endpoint-hosted.yaml"
-
-	// The apiservice resources should be deleted
-	hubApiserviceFiles = []string{
-		"cluster-manager/hub/cluster-manager-work-webhook-apiservice.yaml",
-		"cluster-manager/hub/cluster-manager-registration-webhook-apiservice.yaml",
-	}
 )
 
 type hubReoncile struct {
-	hubKubeClient            kubernetes.Interface
-	hubAPIRegistrationClient apiregistrationclient.APIServicesGetter
-
-	cache    resourceapply.ResourceCache
-	recorder events.Recorder
+	hubKubeClient kubernetes.Interface
+	cache         resourceapply.ResourceCache
+	recorder      events.Recorder
 }
 
 func (c *hubReoncile) reconcile(ctx context.Context, cm *operatorapiv1.ClusterManager, config manifests.HubConfig) (*operatorapiv1.ClusterManager, reconcileState, error) {
+	// If AddOnManager is not enabled, remove related resources
+	if operatorapiv1.ComponentModeType(config.AddOnManagerComponentMode) != operatorapiv1.ComponentModeTypeEnable {
+		_, _, err := cleanResources(ctx, c.hubKubeClient, cm, config, hubAddOnManagerRbacResourceFiles...)
+		if err != nil {
+			return cm, reconcileStop, err
+		}
+	}
+
 	hubResources := getHubResources(cm.Spec.DeployOption.Mode, config)
 	var appliedErrs []error
 
 	resourceResults := helpers.ApplyDirectly(
 		ctx,
 		c.hubKubeClient,
-		nil,
 		nil,
 		c.recorder,
 		c.cache,
@@ -115,36 +121,15 @@ func (c *hubReoncile) reconcile(ctx context.Context, cm *operatorapiv1.ClusterMa
 
 func (c *hubReoncile) clean(ctx context.Context, cm *operatorapiv1.ClusterManager, config manifests.HubConfig) (*operatorapiv1.ClusterManager, reconcileState, error) {
 	hubResources := getHubResources(cm.Spec.DeployOption.Mode, config)
-	// TODO apiservice is added only to ensure they are removed when cleanup. this code should be removed later
-	hubResources = append(hubResources, hubApiserviceFiles...)
-
-	for _, file := range hubResources {
-		err := helpers.CleanUpStaticObject(
-			ctx,
-			c.hubKubeClient,
-			nil,
-			c.hubAPIRegistrationClient,
-			func(name string) ([]byte, error) {
-				template, err := manifests.ClusterManagerManifestFiles.ReadFile(name)
-				if err != nil {
-					return nil, err
-				}
-				return assets.MustCreateAssetFromTemplate(name, template, config).Data, nil
-			},
-			file,
-		)
-		if err != nil {
-			// TODO update condition
-			return cm, reconcileContinue, err
-		}
-	}
-
-	return cm, reconcileContinue, nil
+	return cleanResources(ctx, c.hubKubeClient, cm, config, hubResources...)
 }
 
 func getHubResources(mode operatorapiv1.InstallMode, config manifests.HubConfig) []string {
 	hubResources := []string{namespaceResource}
 	hubResources = append(hubResources, hubRbacResourceFiles...)
+	if operatorapiv1.ComponentModeType(config.AddOnManagerComponentMode) == operatorapiv1.ComponentModeTypeEnable {
+		hubResources = append(hubResources, hubAddOnManagerRbacResourceFiles...)
+	}
 	// the hubHostedWebhookServiceFiles are only used in hosted mode
 	if mode == operatorapiv1.InstallModeHosted {
 		hubResources = append(hubResources, hubHostedWebhookServiceFiles...)
