@@ -11,10 +11,12 @@ import (
 	"github.com/openshift/library-go/pkg/assets"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/kubernetes"
+	apiregistrationclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/typed/apiregistration/v1"
 	operatorapiv1 "open-cluster-management.io/api/operator/v1"
 	"open-cluster-management.io/registration-operator/manifests"
 	"open-cluster-management.io/registration-operator/pkg/helpers"
@@ -70,12 +72,19 @@ var (
 	// hubHostedWebhookEndpointFiles only apply when the deploy mode is hosted and address is IPFormat.
 	hubHostedWebhookEndpointRegistration = "cluster-manager/hub/cluster-manager-registration-webhook-endpoint-hosted.yaml"
 	hubHostedWebhookEndpointWork         = "cluster-manager/hub/cluster-manager-work-webhook-endpoint-hosted.yaml"
+
+	hubWebhookAPIServiceNames = []string{
+		"v1.admission.cluster.open-cluster-management.io",
+		"v1.admission.work.open-cluster-management.io",
+	}
 )
 
 type hubReoncile struct {
-	hubKubeClient kubernetes.Interface
-	cache         resourceapply.ResourceCache
-	recorder      events.Recorder
+	hubKubeClient            kubernetes.Interface
+	hubAPIRegistrationClient apiregistrationclient.APIServicesGetter
+
+	cache    resourceapply.ResourceCache
+	recorder events.Recorder
 }
 
 func (c *hubReoncile) reconcile(ctx context.Context, cm *operatorapiv1.ClusterManager, config manifests.HubConfig) (*operatorapiv1.ClusterManager, reconcileState, error) {
@@ -115,6 +124,13 @@ func (c *hubReoncile) reconcile(ctx context.Context, cm *operatorapiv1.ClusterMa
 		},
 		hubResources...,
 	)
+
+	//TODO: Handle Upgrade case, should delete later
+	err := c.cleanApiservice(ctx)
+	if err != nil {
+		appliedErrs = append(appliedErrs, err)
+	}
+
 	for _, result := range resourceResults {
 		if result.Error != nil {
 			appliedErrs = append(appliedErrs, fmt.Errorf("%q (%T): %v", result.File, result.Type, result.Error))
@@ -134,6 +150,20 @@ func (c *hubReoncile) reconcile(ctx context.Context, cm *operatorapiv1.ClusterMa
 	return cm, reconcileContinue, nil
 }
 
+func (c *hubReoncile) cleanApiservice(ctx context.Context) error {
+	var err error
+	if c.hubAPIRegistrationClient == nil {
+		err = fmt.Errorf("apiRegistrationClient is nil")
+		return err
+	}
+	for _, apiServiceName := range hubWebhookAPIServiceNames {
+		err = c.hubAPIRegistrationClient.APIServices().Delete(ctx, apiServiceName, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
 func (c *hubReoncile) clean(ctx context.Context, cm *operatorapiv1.ClusterManager, config manifests.HubConfig) (*operatorapiv1.ClusterManager, reconcileState, error) {
 	hubResources := getHubResources(cm.Spec.DeployOption.Mode, config)
 	return cleanResources(ctx, c.hubKubeClient, cm, config, hubResources...)

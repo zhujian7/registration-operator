@@ -23,14 +23,15 @@ import (
 	fakekube "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
+	fakeapiregistration "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/fake"
+	apiregistrationclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/typed/apiregistration/v1"
 	fakeoperatorlient "open-cluster-management.io/api/client/operator/clientset/versioned/fake"
 	operatorinformers "open-cluster-management.io/api/client/operator/informers/externalversions"
 	operatorapiv1 "open-cluster-management.io/api/operator/v1"
-	fakemigrationclient "sigs.k8s.io/kube-storage-version-migrator/pkg/clients/clientset/fake"
-	migrationclient "sigs.k8s.io/kube-storage-version-migrator/pkg/clients/clientset/typed/migration/v1alpha1"
-
 	"open-cluster-management.io/registration-operator/pkg/helpers"
 	testinghelper "open-cluster-management.io/registration-operator/pkg/helpers/testing"
+	fakemigrationclient "sigs.k8s.io/kube-storage-version-migrator/pkg/clients/clientset/fake"
+	migrationclient "sigs.k8s.io/kube-storage-version-migrator/pkg/clients/clientset/typed/migration/v1alpha1"
 )
 
 var (
@@ -247,6 +248,7 @@ func setup(t *testing.T, tc *testController, cd []runtime.Object, crds ...runtim
 	fakeManagementKubeClient := fakekube.NewSimpleClientset(cd...)
 	fakeAPIExtensionClient := fakeapiextensions.NewSimpleClientset(crds...)
 	fakeMigrationClient := fakemigrationclient.NewSimpleClientset()
+	fakeAPIRegistrationClient := fakeapiregistration.NewSimpleClientset()
 
 	// set clients in test controller
 	tc.apiExtensionClient = fakeAPIExtensionClient
@@ -256,8 +258,8 @@ func setup(t *testing.T, tc *testController, cd []runtime.Object, crds ...runtim
 	// set clients in clustermanager controller
 	tc.clusterManagerController.recorder = eventstesting.NewTestingEventRecorder(t)
 	tc.clusterManagerController.operatorKubeClient = fakeManagementKubeClient
-	tc.clusterManagerController.generateHubClusterClients = func(hubKubeConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, migrationclient.StorageVersionMigrationsGetter, error) {
-		return fakeHubKubeClient, fakeAPIExtensionClient, fakeMigrationClient.MigrationV1alpha1(), nil
+	tc.clusterManagerController.generateHubClusterClients = func(hubKubeConfig *rest.Config) (kubernetes.Interface, apiextensionsclient.Interface, apiregistrationclient.APIServicesGetter, migrationclient.StorageVersionMigrationsGetter, error) {
+		return fakeHubKubeClient, fakeAPIExtensionClient, fakeAPIRegistrationClient.ApiregistrationV1(), fakeMigrationClient.MigrationV1alpha1(), nil
 	}
 	tc.clusterManagerController.ensureSAKubeconfigs = func(ctx context.Context, clusterManagerName, clusterManagerNamespace string, hubConfig *rest.Config, hubClient, managementClient kubernetes.Interface, recorder events.Recorder) error {
 		return nil
@@ -471,4 +473,22 @@ func TestIsIPFormat(t *testing.T) {
 			t.Fatalf("expected %v, got %v", c.isIPFormat, isIPFormat(c.address))
 		}
 	}
+}
+
+func Test_generateHubClients(t *testing.T) {
+	var fakeKubeConfig rest.Config
+	_, _, _, _, err := generateHubClients(&fakeKubeConfig)
+	if err != nil {
+		t.Fatalf("expected no error, but got err:%v", err)
+	}
+}
+
+func Test_cleanApiservice(t *testing.T) {
+	var c hubReoncile
+	c.hubAPIRegistrationClient = nil
+	err := c.cleanApiservice(context.Background())
+	if err == nil {
+		t.Fatalf("expected no error, but got err:%v", err)
+	}
+
 }
