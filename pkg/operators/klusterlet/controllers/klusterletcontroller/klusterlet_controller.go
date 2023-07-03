@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
 	appsinformer "k8s.io/client-go/informers/apps/v1"
-	coreinformer "k8s.io/client-go/informers/core/v1"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -75,7 +75,7 @@ func NewKlusterletController(
 	apiExtensionClient apiextensionsclient.Interface,
 	klusterletClient operatorv1client.KlusterletInterface,
 	klusterletInformer operatorinformer.KlusterletInformer,
-	secretInformer coreinformer.SecretInformer,
+	secretInformers map[string]corev1informers.SecretInformer,
 	deploymentInformer appsinformer.DeploymentInformer,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	kubeVersion *version.Version,
@@ -94,7 +94,10 @@ func NewKlusterletController(
 	}
 
 	return factory.New().WithSync(controller.sync).
-		WithInformersQueueKeyFunc(helpers.KlusterletSecretQueueKeyFunc(controller.klusterletLister), secretInformer.Informer()).
+		WithInformersQueueKeyFunc(helpers.KlusterletSecretQueueKeyFunc(controller.klusterletLister),
+			secretInformers[helpers.HubKubeConfig].Informer(),
+			secretInformers[helpers.BootstrapHubKubeConfig].Informer(),
+			secretInformers[helpers.ExternalManagedKubeConfig].Informer()).
 		WithInformersQueueKeyFunc(helpers.KlusterletDeploymentQueueKeyFunc(controller.klusterletLister), deploymentInformer.Informer()).
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)

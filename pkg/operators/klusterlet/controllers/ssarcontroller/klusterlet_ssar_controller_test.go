@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"k8s.io/apimachinery/pkg/fields"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,12 +88,24 @@ func newTestController(t *testing.T, klusterlet *operatorapiv1.Klusterlet, objec
 	fakeKubeClient := fakekube.NewSimpleClientset(objects...)
 	fakeOperatorClient := fakeoperatorclient.NewSimpleClientset(klusterlet)
 	operatorInformers := operatorinformers.NewSharedInformerFactory(fakeOperatorClient, 5*time.Minute)
-	kubeInformers := kubeinformers.NewSharedInformerFactory(fakeKubeClient, 5*time.Minute)
+
+	newOnTermInformer := func(name string) kubeinformers.SharedInformerFactory {
+		return kubeinformers.NewSharedInformerFactoryWithOptions(fakeKubeClient, 5*time.Minute,
+			kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			}))
+	}
+
+	secretInformers := map[string]corev1informers.SecretInformer{
+		helpers.HubKubeConfig:             newOnTermInformer(helpers.HubKubeConfig).Core().V1().Secrets(),
+		helpers.BootstrapHubKubeConfig:    newOnTermInformer(helpers.BootstrapHubKubeConfig).Core().V1().Secrets(),
+		helpers.ExternalManagedKubeConfig: newOnTermInformer(helpers.ExternalManagedKubeConfig).Core().V1().Secrets(),
+	}
 
 	klusterletController := &ssarController{
 		kubeClient:       fakeKubeClient,
 		klusterletClient: fakeOperatorClient.OperatorV1().Klusterlets(),
-		secretLister:     kubeInformers.Core().V1().Secrets().Lister(),
+		secretInformers:  secretInformers,
 		klusterletLister: operatorInformers.Operator().V1().Klusterlets().Lister(),
 		klusterletLocker: &klusterletLocker{
 			klusterletInChecking: make(map[string]struct{}),

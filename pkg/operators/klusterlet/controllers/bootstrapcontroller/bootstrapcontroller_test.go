@@ -7,7 +7,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"k8s.io/apimachinery/pkg/fields"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"math/big"
+	"open-cluster-management.io/registration-operator/pkg/helpers"
 	"testing"
 	"time"
 
@@ -102,16 +105,6 @@ func TestSync(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fakeKubeClient := fakekube.NewSimpleClientset(c.objects...)
-			kubeInformers := kubeinformers.NewSharedInformerFactory(fakeKubeClient, 5*time.Minute)
-			secretStore := kubeInformers.Core().V1().Secrets().Informer().GetStore()
-			for _, object := range c.objects {
-				switch object.(type) {
-				case *corev1.Secret:
-					if err := secretStore.Add(object); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
 
 			fakeOperatorClient := fakeoperatorclient.NewSimpleClientset()
 			operatorInformers := operatorinformers.NewSharedInformerFactory(fakeOperatorClient, 5*time.Minute)
@@ -120,10 +113,46 @@ func TestSync(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			newOnTermInformer := func(name string) kubeinformers.SharedInformerFactory {
+				return kubeinformers.NewSharedInformerFactoryWithOptions(fakeKubeClient, 5*time.Minute,
+					kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
+						options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+					}))
+			}
+
+			secretInformers := map[string]corev1informers.SecretInformer{
+				helpers.HubKubeConfig:             newOnTermInformer(helpers.HubKubeConfig).Core().V1().Secrets(),
+				helpers.BootstrapHubKubeConfig:    newOnTermInformer(helpers.BootstrapHubKubeConfig).Core().V1().Secrets(),
+				helpers.ExternalManagedKubeConfig: newOnTermInformer(helpers.ExternalManagedKubeConfig).Core().V1().Secrets(),
+			}
+
+			for _, o := range c.objects {
+				switch object := o.(type) {
+				case *corev1.Secret:
+					switch object.Name {
+					case helpers.HubKubeConfig:
+						secretStore := secretInformers[helpers.HubKubeConfig].Informer().GetStore()
+						if err := secretStore.Add(object); err != nil {
+							t.Fatal(err)
+						}
+					case helpers.BootstrapHubKubeConfig:
+						secretStore := secretInformers[helpers.BootstrapHubKubeConfig].Informer().GetStore()
+						if err := secretStore.Add(object); err != nil {
+							t.Fatal(err)
+						}
+					case helpers.ExternalManagedKubeConfig:
+						secretStore := secretInformers[helpers.ExternalManagedKubeConfig].Informer().GetStore()
+						if err := secretStore.Add(object); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			}
+
 			controller := &bootstrapController{
 				kubeClient:       fakeKubeClient,
 				klusterletLister: operatorInformers.Operator().V1().Klusterlets().Lister(),
-				secretLister:     kubeInformers.Core().V1().Secrets().Lister(),
+				secretInformers:  secretInformers,
 			}
 
 			syncContext := testinghelper.NewFakeSyncContext(t, c.queueKey)

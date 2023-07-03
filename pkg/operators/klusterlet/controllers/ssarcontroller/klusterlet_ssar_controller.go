@@ -12,9 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	coreinformer "k8s.io/client-go/informers/core/v1"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
-	corelister "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
@@ -31,7 +30,7 @@ var SSARReSyncTime = 30 * time.Second
 
 type ssarController struct {
 	kubeClient       kubernetes.Interface
-	secretLister     corelister.SecretLister
+	secretInformers  map[string]corev1informers.SecretInformer
 	klusterletClient operatorv1client.KlusterletInterface
 	klusterletLister operatorlister.KlusterletLister
 	*klusterletLocker
@@ -50,21 +49,24 @@ func NewKlusterletSSARController(
 	kubeClient kubernetes.Interface,
 	klusterletClient operatorv1client.KlusterletInterface,
 	klusterletInformer operatorinformer.KlusterletInformer,
-	secretInformer coreinformer.SecretInformer,
+	secretInformers map[string]corev1informers.SecretInformer,
 	recorder events.Recorder,
 ) factory.Controller {
 	controller := &ssarController{
 		kubeClient:       kubeClient,
 		klusterletClient: klusterletClient,
 		klusterletLister: klusterletInformer.Lister(),
-		secretLister:     secretInformer.Lister(),
+		secretInformers:  secretInformers,
 		klusterletLocker: &klusterletLocker{
 			klusterletInChecking: make(map[string]struct{}),
 		},
 	}
 
 	return factory.New().WithSync(controller.sync).
-		WithInformersQueueKeyFunc(helpers.KlusterletSecretQueueKeyFunc(controller.klusterletLister), secretInformer.Informer()).
+		WithInformersQueueKeyFunc(helpers.KlusterletSecretQueueKeyFunc(controller.klusterletLister),
+			secretInformers[helpers.HubKubeConfig].Informer(),
+			secretInformers[helpers.BootstrapHubKubeConfig].Informer(),
+			secretInformers[helpers.ExternalManagedKubeConfig].Informer()).
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()

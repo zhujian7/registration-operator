@@ -3,6 +3,10 @@ package klusterlet
 import (
 	"context"
 	"io/ioutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	corev1informers "k8s.io/client-go/informers/core/v1"
+	"open-cluster-management.io/registration-operator/pkg/helpers"
 	"time"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -51,6 +55,29 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 
 	kubeInformer := informers.NewSharedInformerFactory(kubeClient, 5*time.Minute)
 
+	// to reduce cache size if there are larges number of secrets
+	newOneTermInformer := func(name string) informers.SharedInformerFactory {
+		return informers.NewSharedInformerFactoryWithOptions(kubeClient, 5*time.Minute,
+			informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			}))
+	}
+
+	hubConfigSecretInformer := newOneTermInformer(helpers.HubKubeConfig)
+	bootstrapConfigSecretInformer := newOneTermInformer(helpers.BootstrapHubKubeConfig)
+	externalConfigSecretInformer := newOneTermInformer(helpers.WorkWebhookSecret)
+
+	secretInformers := map[string]corev1informers.SecretInformer{
+		helpers.HubKubeConfig:             hubConfigSecretInformer.Core().V1().Secrets(),
+		helpers.BootstrapHubKubeConfig:    bootstrapConfigSecretInformer.Core().V1().Secrets(),
+		helpers.ExternalManagedKubeConfig: externalConfigSecretInformer.Core().V1().Secrets(),
+	}
+
+	deploymentInformer := informers.NewSharedInformerFactoryWithOptions(kubeClient, 5*time.Minute,
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.LabelSelector = "createdBy=klusterlet"
+		}))
+
 	// Build operator client and informer
 	operatorClient, err := operatorclient.NewForConfig(controllerContext.KubeConfig)
 	if err != nil {
@@ -75,8 +102,8 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 		apiExtensionClient,
 		operatorClient.OperatorV1().Klusterlets(),
 		operatorInformer.Operator().V1().Klusterlets(),
-		kubeInformer.Core().V1().Secrets(),
-		kubeInformer.Apps().V1().Deployments(),
+		secretInformers,
+		deploymentInformer.Apps().V1().Deployments(),
 		workClient.WorkV1().AppliedManifestWorks(),
 		kubeVersion,
 		operatorNamespace,
@@ -88,8 +115,8 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 		apiExtensionClient,
 		operatorClient.OperatorV1().Klusterlets(),
 		operatorInformer.Operator().V1().Klusterlets(),
-		kubeInformer.Core().V1().Secrets(),
-		kubeInformer.Apps().V1().Deployments(),
+		secretInformers,
+		deploymentInformer.Apps().V1().Deployments(),
 		workClient.WorkV1().AppliedManifestWorks(),
 		kubeVersion,
 		operatorNamespace,
@@ -99,7 +126,7 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 		kubeClient,
 		operatorClient.OperatorV1().Klusterlets(),
 		operatorInformer.Operator().V1().Klusterlets(),
-		kubeInformer.Core().V1().Secrets(),
+		secretInformers,
 		controllerContext.EventRecorder,
 	)
 
@@ -107,14 +134,14 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 		kubeClient,
 		operatorClient.OperatorV1().Klusterlets(),
 		operatorInformer.Operator().V1().Klusterlets(),
-		kubeInformer.Apps().V1().Deployments(),
+		deploymentInformer.Apps().V1().Deployments(),
 		controllerContext.EventRecorder,
 	)
 
 	bootstrapController := bootstrapcontroller.NewBootstrapController(
 		kubeClient,
 		operatorInformer.Operator().V1().Klusterlets(),
-		kubeInformer.Core().V1().Secrets(),
+		secretInformers,
 		controllerContext.EventRecorder,
 	)
 
@@ -127,6 +154,10 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 
 	go operatorInformer.Start(ctx.Done())
 	go kubeInformer.Start(ctx.Done())
+	go hubConfigSecretInformer.Start(ctx.Done())
+	go bootstrapConfigSecretInformer.Start(ctx.Done())
+	go externalConfigSecretInformer.Start(ctx.Done())
+	go deploymentInformer.Start(ctx.Done())
 	go klusterletController.Run(ctx, 1)
 	go klusterletCleanupController.Run(ctx, 1)
 	go statusController.Run(ctx, 1)
