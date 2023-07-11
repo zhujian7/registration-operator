@@ -183,8 +183,9 @@ func (t *Tester) CreateKlusterlet(name, clusterName, klusterletNamespace string,
 			Name: name,
 		},
 		Spec: operatorapiv1.KlusterletSpec{
-			RegistrationImagePullSpec: "quay.io/open-cluster-management/registration:latest",
-			WorkImagePullSpec:         "quay.io/open-cluster-management/work:latest",
+			RegistrationImagePullSpec: getRegistrationImage(),
+			WorkImagePullSpec:         getWorkImage(),
+
 			ExternalServerURLs: []operatorapiv1.ServerURL{
 				{
 					URL: "https://localhost",
@@ -847,4 +848,18 @@ func changeHostOfKubeconfigSecret(secret corev1.Secret, apiServerURL string) (*c
 
 	klog.Info("Set the cluster server URL in %v secret", "apiServerURL", secret.Name, apiServerURL)
 	return &secret, nil
+}
+
+func getRegistrationImage() string {
+	if image := os.Getenv("REGISTRATION_IMAGE"); len(image) > 0 {
+		return image
+	}
+	return "quay.io/open-cluster-management/registration:latest"
+}
+
+func getWorkImage() string {
+	if image := os.Getenv("WORK_IMAGE"); len(image) > 0 {
+		return image
+	}
+	return "quay.io/open-cluster-management/work:latest"
 }

@@ -1,5 +1,7 @@
 SHELL :=/bin/bash
 
+export CGO_ENABLED  = 1
+
 all: build
 .PHONY: all
 
@@ -22,15 +24,15 @@ CSV_VERSION?=0.11.0
 
 # WORK_IMAGE can be set in the env to override calculated value
 WORK_TAG?=latest
-WORK_IMAGE?=$(IMAGE_REGISTRY)/work:$(WORK_TAG)
+export WORK_IMAGE?=$(IMAGE_REGISTRY)/work:$(WORK_TAG)
 
 # REGISTRATION_IMAGE can be set in the env to override calculated value
 REGISTRATION_TAG?=latest
-REGISTRATION_IMAGE?=$(IMAGE_REGISTRY)/registration:$(REGISTRATION_TAG)
+export REGISTRATION_IMAGE?=$(IMAGE_REGISTRY)/registration:$(REGISTRATION_TAG)
 
 # PLACEMENT_IMAGE can be set in the env to override calculated value
 PLACEMENT_TAG?=latest
-PLACEMENT_IMAGE?=$(IMAGE_REGISTRY)/placement:$(PLACEMENT_TAG)
+export PLACEMENT_IMAGE?=$(IMAGE_REGISTRY)/placement:$(PLACEMENT_TAG)
 
 # ADDON_MANAGER_IMAGE can be set in the env to override calculated value
 ADDON_MANAGER_TAG?=latest
