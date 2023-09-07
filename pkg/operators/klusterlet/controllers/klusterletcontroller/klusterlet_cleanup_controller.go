@@ -2,11 +2,12 @@ package klusterletcontroller
 
 import (
 	"context"
-	appsinformer "k8s.io/client-go/informers/apps/v1"
-	corev1informers "k8s.io/client-go/informers/core/v1"
 	"reflect"
 	"strings"
 	"time"
+
+	appsinformer "k8s.io/client-go/informers/apps/v1"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 
 	"github.com/openshift/library-go/pkg/assets"
 	"github.com/openshift/library-go/pkg/controller/factory"
@@ -57,7 +58,7 @@ func NewKlusterletCleanupController(
 		klusterletLister:             klusterletInformer.Lister(),
 		kubeVersion:                  kubeVersion,
 		operatorNamespace:            operatorNamespace,
-		managedClusterClientsBuilder: newManagedClusterClientsBuilder(kubeClient, apiExtensionClient, appliedManifestWorkClient),
+		managedClusterClientsBuilder: newManagedClusterClientsBuilder(kubeClient, apiExtensionClient, appliedManifestWorkClient, recorder),
 	}
 
 	return factory.New().WithSync(controller.sync).

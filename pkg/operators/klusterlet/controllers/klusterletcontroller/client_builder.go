@@ -6,6 +6,8 @@ package klusterletcontroller
 
 import (
 	"context"
+
+	"github.com/openshift/library-go/pkg/operator/events"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -34,6 +36,7 @@ type managedClusterClientsBuilder struct {
 	kubeClient                kubernetes.Interface
 	apiExtensionClient        apiextensionsclient.Interface
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
+	recorder                  events.Recorder
 
 	mode            operatorapiv1.InstallMode
 	secretNamespace string
@@ -44,11 +47,13 @@ func newManagedClusterClientsBuilder(
 	kubeClient kubernetes.Interface,
 	apiExtensionClient apiextensionsclient.Interface,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
+	recorder events.Recorder,
 ) *managedClusterClientsBuilder {
 	return &managedClusterClientsBuilder{
 		kubeClient:                kubeClient,
 		apiExtensionClient:        apiExtensionClient,
 		appliedManifestWorkClient: appliedManifestWorkClient,
+		recorder:                  recorder,
 	}
 }
 
@@ -75,7 +80,7 @@ func (m *managedClusterClientsBuilder) build(ctx context.Context) (*managedClust
 	// Ensure the agent namespace for users to create the external-managed-kubeconfig secret in this
 	// namespace, so that in the next reconcile loop the controller can get the secret successfully after
 	// the secret was created.
-	if err := ensureAgentNamespace(ctx, m.kubeClient, m.secretNamespace); err != nil {
+	if err := ensureAgentNamespace(ctx, m.kubeClient, m.secretNamespace, m.recorder); err != nil {
 		return nil, err
 	}
 
