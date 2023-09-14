@@ -223,3 +223,43 @@ func TestSyncAddHostedFinalizerWhenKubeconfigReady(t *testing.T) {
 		t.Errorf("Expected there is klusterlet hosted finalizer")
 	}
 }
+
+func TestConnectivityError(t *testing.T) {
+	cases := []struct {
+		name                        string
+		err                         error
+		isTCPTimeOutError           bool
+		isTCPNoSuchHostError        bool
+		isTCPConnectionRefusedError bool
+	}{
+		{
+			name:              "TCPTimeOutError",
+			err:               fmt.Errorf("dial tcp 172.0.0.1:443: connect: i/o timeout"),
+			isTCPTimeOutError: true,
+		},
+		{
+			name:                 "TCPNoSuchHostError",
+			err:                  fmt.Errorf("dial tcp: lookup foo.bar.com: connect: no such host"),
+			isTCPNoSuchHostError: true,
+		},
+		{
+			name:                        "TCPConnectionRefusedError",
+			err:                         fmt.Errorf("dial tcp 172.0.0.1:443: connect: connection refused"),
+			isTCPConnectionRefusedError: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if isTCPTimeOutError(c.err) != c.isTCPTimeOutError {
+				t.Errorf("Expected isTCPTimeOutError %v, but got %v", c.isTCPTimeOutError, isTCPTimeOutError(c.err))
+			}
+			if isTCPNoSuchHostError(c.err) != c.isTCPNoSuchHostError {
+				t.Errorf("Expected isTCPNoSuchHostError %v, but got %v", c.isTCPNoSuchHostError, isTCPNoSuchHostError(c.err))
+			}
+			if isTCPConnectionRefusedError(c.err) != c.isTCPConnectionRefusedError {
+				t.Errorf("Expected isTCPConnectionRefusedError %v, but got %v", c.isTCPConnectionRefusedError, isTCPConnectionRefusedError(c.err))
+			}
+		})
+	}
+}

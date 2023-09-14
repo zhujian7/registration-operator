@@ -214,7 +214,7 @@ func (r *klusterletCleanupController) checkConnectivity(ctx context.Context,
 
 	// if the managed cluster is destroyed, the returned err is TCP timeout or TCP no such host,
 	// the k8s.io/apimachinery/pkg/api/errors.IsTimeout,IsServerTimeout can not match this error
-	if isTCPTimeOutError(err) || isTCPNoSuchHostError(err) {
+	if isTCPTimeOutError(err) || isTCPNoSuchHostError(err) || isTCPConnectionRefusedError(err) {
 		klog.V(4).Infof("Check the connectivity for klusterlet %s, annotation: %s, err: %v",
 			klusterlet.Name, klusterlet.Annotations, err)
 		if klusterlet.Annotations == nil {
@@ -258,6 +258,12 @@ func isTCPNoSuchHostError(err error) bool {
 	return err != nil &&
 		strings.Contains(err.Error(), "dial tcp: lookup") &&
 		strings.Contains(err.Error(), "no such host")
+}
+
+func isTCPConnectionRefusedError(err error) bool {
+	return err != nil &&
+		strings.Contains(err.Error(), "dial tcp") &&
+		strings.Contains(err.Error(), "connection refused")
 }
 
 func (n *klusterletCleanupController) updateKlusterletAnnotation(
