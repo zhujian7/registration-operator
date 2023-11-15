@@ -56,6 +56,8 @@ const (
 	FeatureGatesTypeValid             = "ValidFeatureGates"
 	FeatureGatesReasonAllValid        = "FeatureGatesAllValid"
 	FeatureGatesReasonInvalidExisting = "InvalidFeatureGatesExisting"
+
+	KlusterletRebootstrapProgressing = "RebootstrapProgressing"
 )
 
 // OperatorType represents the type of operator supported by the current controller, value could be

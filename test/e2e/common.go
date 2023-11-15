@@ -165,8 +165,8 @@ func (t *Tester) CreateKlusterlet(name, clusterName, klusterletNamespace string,
 			Name: name,
 		},
 		Spec: operatorapiv1.KlusterletSpec{
-			RegistrationImagePullSpec: "quay.io/open-cluster-management/registration:latest",
-			WorkImagePullSpec:         "quay.io/open-cluster-management/work:latest",
+			RegistrationImagePullSpec: getRegistrationImage(),
+			WorkImagePullSpec:         getWorkImage(),
 			ExternalServerURLs: []operatorapiv1.ServerURL{
 				{
 					URL: "https://localhost",
@@ -255,8 +255,8 @@ func (t *Tester) CreatePureHostedKlusterlet(name, clusterName string) (*operator
 			Name: name,
 		},
 		Spec: operatorapiv1.KlusterletSpec{
-			RegistrationImagePullSpec: "quay.io/open-cluster-management/registration:latest",
-			WorkImagePullSpec:         "quay.io/open-cluster-management/work:latest",
+			RegistrationImagePullSpec: getRegistrationImage(),
+			WorkImagePullSpec:         getWorkImage(),
 			ExternalServerURLs: []operatorapiv1.ServerURL{
 				{
 					URL: "https://localhost",
@@ -701,4 +701,18 @@ func (t *Tester) CheckManagedClusterAddOnStatus(managedClusterNamespace, addOnNa
 	}
 
 	return nil
+}
+
+func getRegistrationImage() string {
+	if image := os.Getenv("REGISTRATION_IMAGE"); len(image) > 0 {
+		return image
+	}
+	return "quay.io/open-cluster-management/registration:latest"
+}
+
+func getWorkImage() string {
+	if image := os.Getenv("WORK_IMAGE"); len(image) > 0 {
+		return image
+	}
+	return "quay.io/open-cluster-management/work:latest"
 }

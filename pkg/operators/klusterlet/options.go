@@ -3,11 +3,12 @@ package klusterlet
 import (
 	"context"
 	"io/ioutil"
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	corev1informers "k8s.io/client-go/informers/core/v1"
 	"open-cluster-management.io/registration-operator/pkg/helpers"
-	"time"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -138,6 +139,7 @@ func (o *Options) RunKlusterletOperator(ctx context.Context, controllerContext *
 
 	bootstrapController := bootstrapcontroller.NewBootstrapController(
 		kubeClient,
+		operatorClient.OperatorV1().Klusterlets(),
 		operatorInformer.Operator().V1().Klusterlets(),
 		secretInformers,
 		controllerContext.EventRecorder,
