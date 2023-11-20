@@ -171,11 +171,11 @@ func (c *runtimeReconcile) clean(ctx context.Context, cm *operatorapiv1.ClusterM
 }
 
 // getSAs return serviceaccount names of all hub components
-func getSAs(clusterManagerName string) []string {
+func getSAs() []string {
 	return []string{
-		clusterManagerName + "-registration-controller-sa",
-		clusterManagerName + "-registration-webhook-sa",
-		clusterManagerName + "-work-webhook-sa",
-		clusterManagerName + "-placement-controller-sa",
+		"registration-controller-sa",
+		"registration-webhook-sa",
+		"work-webhook-sa",
+		"placement-controller-sa",
 	}
 }

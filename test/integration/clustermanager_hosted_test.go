@@ -133,9 +133,9 @@ var _ = ginkgo.Describe("ClusterManager Hosted Mode", func() {
 			}, eventuallyTimeout, eventuallyInterval).Should(gomega.BeNil())
 
 			// Check service account
-			hubRegistrationSA := fmt.Sprintf("%s-registration-controller-sa", clusterManagerName)
-			hubRegistrationWebhookSA := fmt.Sprintf("%s-registration-webhook-sa", clusterManagerName)
-			hubWorkWebhookSA := fmt.Sprintf("%s-work-webhook-sa", clusterManagerName)
+			hubRegistrationSA := "registration-controller-sa"
+			hubRegistrationWebhookSA := "registration-webhook-sa"
+			hubWorkWebhookSA := "work-webhook-sa"
 			gomega.Eventually(func() error {
 				if _, err := hostedKubeClient.CoreV1().ServiceAccounts(hubNamespaceHosted).Get(hostedCtx, hubRegistrationSA, metav1.GetOptions{}); err != nil {
 					return err
@@ -231,12 +231,12 @@ var _ = ginkgo.Describe("ClusterManager Hosted Mode", func() {
 			// Check validating webhook
 			registrationValidtingWebhook := "managedclustervalidators.admission.cluster.open-cluster-management.io"
 
-			//Should not apply the webhook config if the replica and observed is not set
+			// Should not apply the webhook config if the replica and observed is not set
 			_, err := hostedKubeClient.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(hostedCtx, registrationValidtingWebhook, metav1.GetOptions{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 
 			workValidtingWebhook := "manifestworkvalidators.admission.work.open-cluster-management.io"
-			//Should not apply the webhook config if the replica and observed is not set
+			// Should not apply the webhook config if the replica and observed is not set
 			_, err = hostedKubeClient.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(hostedCtx, workValidtingWebhook, metav1.GetOptions{})
 
 			updateDeploymentStatus(hostedKubeClient, hubNamespaceHosted, hubRegistrationWebhookDeployment)

@@ -37,7 +37,7 @@ spec:
                   values:
                   - {{ .ClusterManagerName }}-registration-webhook
       {{ if not .HostedMode }}
-      serviceAccountName: {{ .ClusterManagerName }}-registration-webhook-sa
+      serviceAccountName: registration-webhook-sa
       {{ end }}
       containers:
       - name: {{ .ClusterManagerName }}-registration-webhook-sa
@@ -154,5 +154,5 @@ spec:
       {{ if .HostedMode }}
       - name: kubeconfig
         secret:
-          secretName: {{ .ClusterManagerName }}-registration-webhook-sa-kubeconfig
+          secretName: registration-webhook-sa-kubeconfig
       {{ end }}
