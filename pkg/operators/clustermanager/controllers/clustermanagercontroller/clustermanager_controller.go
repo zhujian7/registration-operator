@@ -271,10 +271,11 @@ func (n *clusterManagerController) sync(ctx context.Context, controllerContext f
 
 	if len(errs) == 0 {
 		conds = append(conds, metav1.Condition{
-			Type:    clusterManagerApplied,
-			Status:  metav1.ConditionTrue,
-			Reason:  "ClusterManagerApplied",
-			Message: "Components of cluster manager are applied",
+			Type:               clusterManagerApplied,
+			Status:             metav1.ConditionTrue,
+			Reason:             "ClusterManagerApplied",
+			Message:            "Components of cluster manager are applied",
+			ObservedGeneration: clusterManager.Generation,
 		})
 	} else {
 		if cond := meta.FindStatusCondition(clusterManager.Status.Conditions, clusterManagerApplied); cond != nil {
